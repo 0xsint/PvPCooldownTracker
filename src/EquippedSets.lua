@@ -373,6 +373,7 @@ local function SaveCustomSetToSavedVars(setKey, entry)
         procDelayMs = NormalizeInteger(entry.procDelayMs) or 0,
         texture = entry.texture,
         showFrame = entry.showFrame ~= false,
+        userProc = entry.userProc == true or nil,
         customRegistered = true,
     }
 end
@@ -728,6 +729,10 @@ function PCT.EquippedSets.SaveSetData(draft)
     newEntry.texture = texture ~= "" and texture or nil
     newEntry.showFrame = draft == nil or draft.showFrame ~= false
     newEntry.customRegistered = true
+    if draft ~= nil and draft.userProc == true then
+        -- Added from the recent-procs list: tracked regardless of equipped gear.
+        newEntry.userProc = true
+    end
 
     if originalSetName ~= newSetName then
         catalog[originalSetName] = nil
@@ -796,6 +801,7 @@ function PCT.EquippedSets.RestoreCustomSets()
                 restoredEntry.onCooldown = existing and existing.onCooldown or false
                 restoredEntry.timeOfProc = tonumber(NormalizeInteger(existing and existing.timeOfProc)) or 0
                 restoredEntry.customRegistered = true
+                restoredEntry.userProc = saved.userProc == true or nil
 
                 catalog[setName] = restoredEntry
                 EnsureDefaultSet(setName)
@@ -837,8 +843,21 @@ function PCT.EquippedSets.BuildLAMControls()
     local selectedEquippedSet = ""
     local SetStatus
 
+    -- LibAddonMenu only reads a dropdown's choices when it is built, so push
+    -- list changes to the live control (if the panel has been opened already).
+    local function PushChoices(reference, choices)
+        local control = _G[reference]
+        if control ~= nil and type(control.UpdateChoices) == "function" then
+            control:UpdateChoices(choices)
+            if type(control.UpdateValue) == "function" then
+                control:UpdateValue()
+            end
+        end
+    end
+
     local function RefreshCatalogChoices(preferredSetName)
         ReplaceListContents(catalogChoices, BuildCatalogSetChoices())
+        PushChoices("PvPCooldownTracker_CatalogDropdown", catalogChoices)
 
         if preferredSetName and preferredSetName ~= "" then
             selectedCatalogSet = preferredSetName
@@ -856,6 +875,7 @@ function PCT.EquippedSets.BuildLAMControls()
 
     local function RefreshEquippedChoices(preferredSetName)
         ReplaceListContents(equippedChoices, BuildEquippedListedChoices(PCT.EquippedSets.lastScanResults))
+        PushChoices("PvPCooldownTracker_EquippedDropdown", equippedChoices)
 
         if preferredSetName and preferredSetName ~= "" then
             for i = 1, #equippedChoices do
@@ -935,6 +955,9 @@ function PCT.EquippedSets.BuildLAMControls()
             end
             RefreshCatalogChoices(setName)
             RefreshEquippedChoices(setName)
+            if PCT.Settings and type(PCT.Settings.RefreshSetChoices) == "function" then
+                PCT.Settings.RefreshSetChoices()
+            end
         end
 
         SetStatus(message)
@@ -1032,6 +1055,7 @@ function PCT.EquippedSets.BuildLAMControls()
             end,
             scrollable = true,
             width      = "full",
+            reference  = "PvPCooldownTracker_CatalogDropdown",
         },
         {
             type       = "dropdown",
@@ -1047,6 +1071,7 @@ function PCT.EquippedSets.BuildLAMControls()
             end,
             scrollable = true,
             width      = "full",
+            reference  = "PvPCooldownTracker_EquippedDropdown",
         },
         {
             type  = "description",

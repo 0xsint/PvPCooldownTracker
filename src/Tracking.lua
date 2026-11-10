@@ -23,6 +23,13 @@ local IGNORE_ABILITY_IDS = {
     [69143] = true,
 }
 
+-- Critical results count as their non-critical counterpart when matching procs.
+local RESULT_EQUIVALENT = {}
+if ACTION_RESULT_CRITICAL_DAMAGE ~= nil then RESULT_EQUIVALENT[ACTION_RESULT_CRITICAL_DAMAGE] = ACTION_RESULT_DAMAGE end
+if ACTION_RESULT_CRITICAL_HEAL ~= nil then RESULT_EQUIVALENT[ACTION_RESULT_CRITICAL_HEAL] = ACTION_RESULT_HEAL end
+PvPCooldownTracker.Tracking.RESULT_EQUIVALENT = RESULT_EQUIVALENT
+PvPCooldownTracker.Tracking.IGNORE_ABILITY_IDS = IGNORE_ABILITY_IDS
+
 local SET_ALIASES = {
     ["Two-Fanged Snake"] = "Twice-Fanged Serpent",
 }
@@ -101,7 +108,9 @@ local function OnCombatEvent(setKey, _, result, _, abilityName, _, _, _, _, _, _
         PCT:Trace(1, "<<1>> (<<2>>) on Cooldown", abilityName, abilityId)
         return
     end
-    if result == set.result then
+    if not set then return end
+    -- A critical hit/heal of the proc is still the proc.
+    if result == set.result or (RESULT_EQUIVALENT[result] ~= nil and RESULT_EQUIVALENT[result] == set.result) then
         PCT:Trace(1, "Name: <<1>> ID: <<2>> with result <<3>> INFO", abilityName, abilityId, result)
         StartCooldown(setKey)
     end
@@ -223,8 +232,11 @@ end
 -- Public: enable/disable tracking for a specific set
 -- -----------------------------------------------------------------------------
 function PvPCooldownTracker.Tracking.EnableTrackingForSet(setKey, enabled)
-    setKey = NormalizePerfectSetName(setKey)
-    setKey = SET_ALIASES[setKey] or setKey
+    -- Exact catalog keys (e.g. player-added procs) win over name normalization.
+    if not PCT.Data.Sets[setKey] then
+        setKey = NormalizePerfectSetName(setKey)
+        setKey = SET_ALIASES[setKey] or setKey
+    end
 
     local set = PCT.Data.Sets[setKey]
     if not set then return end
@@ -263,6 +275,16 @@ function PvPCooldownTracker.Tracking.EnableTrackingForSet(setKey, enabled)
             set.onCooldown = false
         end
     end
+end
+
+-- -----------------------------------------------------------------------------
+-- Public: fake a proc so the player can preview a tracker from the settings menu
+-- -----------------------------------------------------------------------------
+function PvPCooldownTracker.Tracking.TestProc(setKey)
+    local set = PCT.Data.Sets[setKey]
+    if not set or not set.enabled then return false end
+    StartCooldown(setKey)
+    return true
 end
 
 -- -----------------------------------------------------------------------------

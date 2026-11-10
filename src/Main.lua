@@ -4,7 +4,7 @@
 -- -----------------------------------------------------------------------------
 PvPCooldownTracker            = PvPCooldownTracker or {}
 PvPCooldownTracker.name       = "PvPCooldownTracker"
-PvPCooldownTracker.version    = "1.1.1"
+PvPCooldownTracker.version    = "1.2.0"
 PvPCooldownTracker.dbVersion  = 1
 PvPCooldownTracker.slash      = "/pvpcooldowntracker"
 PvPCooldownTracker.prefix     = "[PvPCooldownTracker] "
@@ -138,6 +138,8 @@ function PvPCooldownTracker:SanitizeSavedVars()
         gridSize          = defaults.gridSize,
         showOutsideCombat = defaults.showOutsideCombat,
         lagCompensation   = defaults.lagCompensation,
+        procCapture       = defaults.procCapture,
+        procCaptureMode   = defaults.procCaptureMode,
         size              = defaults.size,
         labelSize         = defaults.labelSize,
         labelFont         = defaults.labelFont,
@@ -292,6 +294,14 @@ local function FinishInitialize(addonId)
     end
 
     PCT:SanitizeSavedVars()
+
+    -- One-time move to the 1.2 look. Colours were not editable before 1.2, so
+    -- anything saved earlier is just the old default palette.
+    if PCT.savedVars.styleVersion ~= 2 then
+        PCT.UI.ApplyTheme("Ember")
+        PCT.savedVars.styleVersion = 2
+    end
+
     PCT.debugMode = PCT.savedVars.debugMode or 0
 
     SLASH_COMMANDS[PCT.slash] = PCT.UI.SlashCommand
@@ -321,6 +331,13 @@ local function FinishInitialize(addonId)
     end
 
     RefreshTrackedEquippedSets()
+
+    -- Player-added procs are not tied to gear, so they are always tracked.
+    -- Then start recording recent procs for the "Add a Proc" menu.
+    if PCT.ProcCapture then
+        PCT.ProcCapture.EnableUserProcs()
+        PCT.ProcCapture.Init()
+    end
 
     -- Initial HUD state
     if PCT.UI and type(PCT.UI.ToggleHUD) == "function" then

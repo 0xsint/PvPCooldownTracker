@@ -255,36 +255,59 @@ local function SetGridSize(gridSize)
 end
 
 -- Locked State
-local function ToggleLocked(control)
+local function SetUnlocked(unlocked)
     local savedVars = EnsureSavedVarsState()
-    savedVars.unlocked = not savedVars.unlocked
-    for key, set in pairs(DataSets) do
-        local context = WM:GetControlByName(key .. "_Container")
-        if context ~= nil then
-            context:SetMovable(savedVars.unlocked)
-            if savedVars.unlocked then
-                control:SetText("Lock All")
-            else
-                control:SetText("Unlock All")
-            end
+    savedVars.unlocked = unlocked == true
+
+    local ui = UIRef or PvPCooldownTracker.UI
+    if ui and type(ui.SetUnlocked) == "function" then
+        ui.SetUnlocked(savedVars.unlocked)
+    end
+end
+
+-- Force Showing (keeps trackers visible while a menu is open)
+local function SetForceShow(value)
+    local ui = UIRef or PvPCooldownTracker.UI
+    PvPCooldownTracker.ForceShow = value == true
+
+    if PvPCooldownTracker.ForceShow then
+        if ui and type(ui.ShowIcon) == "function" then ui.ShowIcon(true) end
+    else
+        -- Fall back to the normal rules: hidden in menus, combat rules on the HUD.
+        local onHud = SCENE_MANAGER ~= nil
+            and (SCENE_MANAGER:IsShowing("hud") or SCENE_MANAGER:IsShowing("hudui"))
+        PvPCooldownTracker.HUDHidden = not onHud
+        if ui and type(ui.SetCombatStateDisplay) == "function" then
+            ui.SetCombatStateDisplay(ui)
         end
     end
 end
 
--- Force Showing
-local function ForceShow(control)
-    PvPCooldownTracker.ForceShow = not PvPCooldownTracker.ForceShow
-    local ui = UIRef or PvPCooldownTracker.UI
+-- Style
+local CUSTOM_THEME = "Custom"
 
-    if PvPCooldownTracker.ForceShow then
-        control:SetText("Hide All Enabled")
-        PvPCooldownTracker.HUDHidden = false
-        if ui and type(ui.ShowIcon) == "function" then ui.ShowIcon(true) end
-    else
-        control:SetText("Show All Enabled")
-        PvPCooldownTracker.HUDHidden = true
-        if ui and type(ui.ShowIcon) == "function" then ui.ShowIcon(false) end
+local function GetStyle()
+    local savedVars = EnsureSavedVarsState()
+    if type(savedVars.style) ~= "table" then
+        local defaults = GetDefaultsTable()
+        savedVars.style = type(defaults.style) == "table" and ZO_DeepTableCopy(defaults.style) or {}
     end
+    return savedVars.style
+end
+
+local function HexToRGB(hex, fallbackHex)
+    local text = tostring(hex or ""):gsub("#", "")
+    if not text:match("^%x%x%x%x%x%x") then
+        text = fallbackHex
+    end
+    return tonumber(text:sub(1, 2), 16) / 255, tonumber(text:sub(3, 4), 16) / 255, tonumber(text:sub(5, 6), 16) / 255, 1
+end
+
+local function RGBToHex(r, g, b)
+    local function Channel(value)
+        return math.floor(math.max(0, math.min(1, tonumber(value) or 0)) * 255 + 0.5)
+    end
+    return string.format("%02X%02X%02X", Channel(r), Channel(g), Channel(b))
 end
 
 -- Combat State Display
@@ -797,28 +820,12 @@ function PvPCooldownTracker.Settings.Init()
     -- Copy key/value table to index/value table
     local settingsBreakout = {
         set = {
-            name = "|cCD5031Sets (Select 1 to change the X, Y position)|r",
+            name = "|cCD5031Tracked Cooldowns|r",
             data = {},
             values = {},
             description = {},
         }
     }
-
-    table.insert(settingsBreakout.set.data, default.set)
-    table.insert(settingsBreakout.set.values, default.set)
-    table.insert(settingsBreakout.set.description, "Choose a tracked set to edit its position, size, and sounds.")
-
-    local sortedSetEntries = BuildSortedSetEntries()
-    for i = 1, #sortedSetEntries do
-        local entry = sortedSetEntries[i]
-        table.insert(settingsBreakout.set.data, entry.key)
-        table.insert(settingsBreakout.set.values, entry.key)
-        table.insert(settingsBreakout.set.description, entry.description)
-    end
-
-    if #sortedSetEntries == 0 then
-        settingsBreakout.set.description[1] = "No tracked sets are currently available."
-    end
 
     for key, set in pairs(DataSets) do
         if set.procType ~= "set" then
@@ -826,34 +833,141 @@ function PvPCooldownTracker.Settings.Init()
         end
     end
 
+    local SET_DROPDOWN = "PvPCooldownTracker_SetDropdown"
+
+    -- Rebuilds the "Tracked Cooldown" dropdown, e.g. after a proc was added or
+    -- removed, and optionally selects an entry.
+    local function RefreshSetChoices(preferredKey)
+        local data, values, description = {}, {}, {}
+        data[1], values[1] = default.set, default.set
+        description[1] = "Choose a tracked cooldown to edit its position, size, and sounds."
+
+        local entries = BuildSortedSetEntries()
+        for i = 1, #entries do
+            local entry = entries[i]
+            local setData = DataSets[entry.key]
+            data[#data + 1] = (setData and setData.userProc) and (entry.key .. "  |cFFD27F[added by you]|r") or entry.key
+            values[#values + 1] = entry.key
+            description[#description + 1] = entry.description or entry.key
+        end
+
+        if #entries == 0 then
+            description[1] = "No tracked cooldowns are currently available."
+        end
+
+        local target = settingsBreakout.set
+        for _, pair in ipairs({ { target.data, data }, { target.values, values }, { target.description, description } }) do
+            for i = #pair[1], 1, -1 do pair[1][i] = nil end
+            for i = 1, #pair[2] do pair[1][i] = pair[2][i] end
+        end
+
+        if IsSelectableSetKey(preferredKey) then
+            EnsureSavedVarsState().lastSelectedSet = preferredKey
+        end
+
+        local control = _G[SET_DROPDOWN]
+        if control ~= nil and type(control.UpdateChoices) == "function" then
+            control:UpdateChoices(target.data, target.values, target.description)
+            if type(control.UpdateValue) == "function" then
+                control:UpdateValue()
+            end
+        end
+    end
+
+    PvPCooldownTracker.Settings.RefreshSetChoices = RefreshSetChoices
+    RefreshSetChoices()
+
+    local function RefreshAllTrackers()
+        local ui = UIRef or PvPCooldownTracker.UI
+        if ui and type(ui.RefreshAll) == "function" then
+            ui.RefreshAll()
+        end
+    end
+
+    -- Colour picker bound to one entry of savedVars.style.
+    local function StyleColorPicker(name, tooltip, styleKey, fallback)
+        return {
+            type    = "colorpicker",
+            name    = name,
+            tooltip = tooltip,
+            getFunc = function()
+                local color = GetStyle()[styleKey]
+                if type(color) ~= "table" then color = fallback end
+                return color[1], color[2], color[3], color[4] or 1
+            end,
+            setFunc = function(r, g, b, a)
+                local style = GetStyle()
+                style[styleKey] = { r, g, b, a or 1 }
+                style.theme = CUSTOM_THEME
+                RefreshAllTrackers()
+            end,
+            width   = "half",
+        }
+    end
+
+    -- Colour picker bound to one of the hex-string text colours.
+    local function HexColorPicker(name, tooltip, savedKey, fallbackHex)
+        return {
+            type    = "colorpicker",
+            name    = name,
+            tooltip = tooltip,
+            getFunc = function()
+                return HexToRGB(EnsureSavedVarsState()[savedKey], fallbackHex)
+            end,
+            setFunc = function(r, g, b)
+                EnsureSavedVarsState()[savedKey] = RGBToHex(r, g, b)
+            end,
+            width   = "half",
+        }
+    end
+
+    local themeChoices = {}
+    do
+        local ui = UIRef or PvPCooldownTracker.UI
+        if ui and type(ui.GetThemeNames) == "function" then
+            themeChoices = ui.GetThemeNames()
+        end
+        themeChoices[#themeChoices + 1] = CUSTOM_THEME
+    end
+
     local optionsTable = {
         {
-            type = "header",
-            name = "Global Settings",
+            type = "description",
+            text = "|cFFD27FPvPCooldownTracker|r shows a countdown for every set proc you wear. "
+                .. "Saw a proc that is missing? Open |cFFFFFFAdd a Proc|r below and track it yourself.",
             width = "full",
         },
         {
-            type = "editbox",
-            name = "Cooldown Expired Text",
-            tooltip = "Edit the cooldown expired text",
-            getFunc = function() return SafeString(EnsureSavedVarsState().cooldown_expired, "FFFF00") end,
-            setFunc = function(text) EnsureSavedVarsState().cooldown_expired = SafeString(text, "FFFF00") end,
-            default = "FFFF00",	--(optional)
-        },
-        {
-            type = "editbox",
-            name = "Cooldown Started Text",
-            tooltip = "Edit the cooldown expired text",
-            getFunc = function() return SafeString(EnsureSavedVarsState().set_active, "3CB043") end,
-            setFunc = function(text) EnsureSavedVarsState().set_active = SafeString(text, "3CB043") end,
-            default = "3CB043",	--(optional)
+            type = "header",
+            name = "|cFFD27FGeneral|r",
+            width = "full",
         },
         {
             type = "checkbox",
-            name = "Lag Compensation",
-            tooltip = "Attempt to adjust proc timing based on lag conditions. Set to ON if you are falsely seeing back-to-back procs and set to OFF if procs in close proximity to being ready are being missed.",
-            getFunc = function() return GetLagCompensation() end,
-            setFunc = function(value) SetLagCompensation(value) end,
+            name = "Unlock Trackers",
+            tooltip = "Set to ON to drag trackers around the screen. Set to OFF to lock them in place and let clicks pass through.",
+            getFunc = function() return EnsureSavedVarsState().unlocked end,
+            setFunc = function(value) SetUnlocked(value) end,
+            width = "full",
+        },
+        {
+            type = "checkbox",
+            name = "Show Trackers While In Menus",
+            tooltip = "Keeps every enabled tracker on screen, even in this menu, so you can see your changes. Turns itself off on reload.",
+            getFunc = function() return PvPCooldownTracker.ForceShow == true end,
+            setFunc = function(value) SetForceShow(value) end,
+            width = "full",
+        },
+        {
+            type = "button",
+            name = "Arrange In A Column",
+            tooltip = "Stacks every enabled tracker into a tidy column so none of them overlap.",
+            func = function()
+                local ui = UIRef or PvPCooldownTracker.UI
+                if ui and type(ui.ArrangeColumn) == "function" then
+                    ui.ArrangeColumn()
+                end
+            end,
             width = "full",
         },
         {
@@ -866,11 +980,19 @@ function PvPCooldownTracker.Settings.Init()
         },
         {
             type = "checkbox",
+            name = "Lag Compensation",
+            tooltip = "Attempt to adjust proc timing based on lag conditions. Set to ON if you are falsely seeing back-to-back procs and set to OFF if procs in close proximity to being ready are being missed.",
+            getFunc = function() return GetLagCompensation() end,
+            setFunc = function(value) SetLagCompensation(value) end,
+            width = "full",
+        },
+        {
+            type = "checkbox",
             name = "Snap to Grid",
             tooltip = "Set to ON to snap position to the specified grid.",
             getFunc = function() return GetSnapToGrid() end,
             setFunc = function(value) SetSnapToGrid(value) end,
-            width = "full",
+            width = "half",
         },
         {
             type = "slider",
@@ -883,15 +1005,127 @@ function PvPCooldownTracker.Settings.Init()
             step = 1,
             clampInput = true,
             decimals = 0,
-            width = "full",
+            width = "half",
             disabled = function() return not GetSnapToGrid() end,
         },
         {
-            type = "divider",
-            width = "full",
-            height = 16,
-            alpha = 0.25,
-        }
+            type = "submenu",
+            name = "|c7EC8E3Appearance|r",
+            controls = {
+                {
+                    type = "dropdown",
+                    name = "Color Theme",
+                    tooltip = "Pick a ready-made palette. You can still change every color below afterwards.",
+                    choices = themeChoices,
+                    getFunc = function() return GetStyle().theme or CUSTOM_THEME end,
+                    setFunc = function(value)
+                        local ui = UIRef or PvPCooldownTracker.UI
+                        if value ~= CUSTOM_THEME and ui and type(ui.ApplyTheme) == "function" then
+                            ui.ApplyTheme(value)
+                        else
+                            GetStyle().theme = CUSTOM_THEME
+                        end
+                    end,
+                    width = "full",
+                },
+                {
+                    type = "dropdown",
+                    name = "Layout",
+                    tooltip = "Bar shows the icon, name, countdown, and a progress bar. Icon Only shows just the icon with the countdown on top.",
+                    choices = { "Bar", "Icon Only" },
+                    choicesValues = { "bar", "icon" },
+                    getFunc = function() return GetStyle().layout == "icon" and "icon" or "bar" end,
+                    setFunc = function(value)
+                        GetStyle().layout = value == "icon" and "icon" or "bar"
+                        RefreshAllTrackers()
+                    end,
+                    width = "full",
+                },
+                {
+                    type = "checkbox",
+                    name = "Show Background Card",
+                    tooltip = "Draws a dark card behind each tracker so it stays readable in a busy fight.",
+                    getFunc = function() return GetStyle().showCard ~= false end,
+                    setFunc = function(value) GetStyle().showCard = value == true RefreshAllTrackers() end,
+                    width = "half",
+                    disabled = function() return GetStyle().layout == "icon" end,
+                },
+                {
+                    type = "checkbox",
+                    name = "Show Name",
+                    tooltip = "Shows the name of the set or proc on the tracker.",
+                    getFunc = function() return GetStyle().showName ~= false end,
+                    setFunc = function(value) GetStyle().showName = value == true RefreshAllTrackers() end,
+                    width = "half",
+                    disabled = function() return GetStyle().layout == "icon" end,
+                },
+                StyleColorPicker("Cooldown Color", "Bar and accent color while the proc is on cooldown.", "barFillColor", { 0.95, 0.45, 0.15, 1 }),
+                StyleColorPicker("Ready Color", "Bar, accent, and glow color when the proc is ready.", "barReadyColor", { 0.36, 0.80, 0.36, 1 }),
+                StyleColorPicker("Name Color", "Color of the set or proc name.", "labelColor", { 0.96, 0.93, 0.88, 1 }),
+                StyleColorPicker("Timer Color", "Color of the countdown number.", "timerColor", { 1, 0.97, 0.91, 1 }),
+                StyleColorPicker("Card Color", "Color and opacity of the background card.", "cardColor", { 0.05, 0.05, 0.07, 0.78 }),
+                StyleColorPicker("Icon Tint On Cooldown", "The icon is dimmed with this color while on cooldown.", "cooldownTint", { 0.62, 0.60, 0.58, 1 }),
+                {
+                    type = "header",
+                    name = "Proc / Ready Announcements",
+                    width = "full",
+                },
+                {
+                    type = "checkbox",
+                    name = "Show Announcements",
+                    tooltip = "Shows floating text when a proc starts cooling down and when it is ready again.",
+                    getFunc = function() return GetStyle().showAnnouncements ~= false end,
+                    setFunc = function(value) GetStyle().showAnnouncements = value == true end,
+                    width = "full",
+                },
+                HexColorPicker("Cooling Down Text Color", "Color of the text shown when a proc goes on cooldown.", "set_active", "3CB043"),
+                HexColorPicker("Ready Text Color", "Color of the text shown when a proc is ready again.", "cooldown_expired", "FFFF00"),
+                {
+                    type = "slider",
+                    name = "Announcement Size",
+                    tooltip = "Scale of the announcement text.",
+                    getFunc = function() return math.max(0.5, math.min(4, EnsureSavedVarsState().labelSize)) end,
+                    setFunc = function(size)
+                        EnsureSavedVarsState().labelSize = SafeNumber(size, EnsureSavedVarsState().labelSize)
+                    end,
+                    min = 0.5,
+                    max = 4,
+                    step = 0.1,
+                    clampInput = true,
+                    decimals = 1,
+                    width = "full",
+                    disabled = function() return GetStyle().showAnnouncements == false end,
+                },
+                {
+                    type = "slider",
+                    name = "Announcement X Position",
+                    tooltip = "Horizontal position of the announcement text.",
+                    min = 0,
+                    max = screenWidth,
+                    step = 10,
+                    getFunc = function() return EnsureSavedVarsState().LabelLocation.x end,
+                    setFunc = function(value)
+                        EnsureSavedVarsState().LabelLocation.x = SafeNumber(value, EnsureSavedVarsState().LabelLocation.x)
+                    end,
+                    width = "half",
+                    disabled = function() return GetStyle().showAnnouncements == false end,
+                },
+                {
+                    type = "slider",
+                    name = "Announcement Y Position",
+                    tooltip = "Vertical position of the announcement text.",
+                    min = 0,
+                    max = screenHeight,
+                    step = 10,
+                    getFunc = function() return EnsureSavedVarsState().LabelLocation.y end,
+                    setFunc = function(value)
+                        EnsureSavedVarsState().LabelLocation.y = SafeNumber(value, EnsureSavedVarsState().LabelLocation.y)
+                    end,
+                    width = "half",
+                    disabled = function() return GetStyle().showAnnouncements == false end,
+                },
+            },
+        },
     }
     for procType, options in pairs(settingsBreakout) do
         table.insert(optionsTable, {
@@ -899,50 +1133,13 @@ function PvPCooldownTracker.Settings.Init()
                 name = options.name,
                 controls = {
                     {
-                        type = "slider",
-                        name = "Label Size",
-                        tooltip = "Grid dimensions to snap positioning of display elements to.",
-                        getFunc = function() return EnsureSavedVarsState().labelSize end,
-                        setFunc = function(size) 
-                            EnsureSavedVarsState().labelSize = SafeNumber(size, EnsureSavedVarsState().labelSize)
-                            UpdateSelectedAppearance(procType)
-                         end,
-                        min = 0,
-                        max = 10,
-                        step = 0.01,
-                        clampInput = true,
-                        decimals = 2,
+                        type = "description",
+                        text = "Pick a tracked cooldown to move it, resize it, or change its sounds. Everything here is saved account-wide.",
                         width = "full",
                     },
                     {
-                        type = "slider",
-                        name = "Label X position",
-                        tooltip = "Change X positioning on label",
-                        min = 0,
-                        max = screenWidth,
-                        step = 10,
-                        getFunc = function() return EnsureSavedVarsState().LabelLocation.x end,
-                        setFunc = function(value) 
-                            EnsureSavedVarsState().LabelLocation.x = SafeNumber(value, EnsureSavedVarsState().LabelLocation.x)
-                            UpdateSelectedAppearance(procType)
-                        end,
-                    },
-                    {
-                        type = "slider",
-                        name = "Label Y position",
-                        tooltip = "Change Y positioning on label",
-                        min = 0,
-                        max = screenHeight,
-                        step = 10,
-                        getFunc = function() return EnsureSavedVarsState().LabelLocation.y end,
-                        setFunc = function(value) 
-                            EnsureSavedVarsState().LabelLocation.y = SafeNumber(value, EnsureSavedVarsState().LabelLocation.y)
-                            UpdateSelectedAppearance(procType)
-                        end,
-                    },
-                    {
                         type = "dropdown",
-                        name = "Option",
+                        name = "Tracked Cooldown",
                         choices = options.data,
                         choicesValues = options.values,
                         getFunc = function()
@@ -954,6 +1151,7 @@ function PvPCooldownTracker.Settings.Init()
                         choicesTooltips = options.description,
                         width = "full",
                         scrollable = true,
+                        reference = SET_DROPDOWN,
                     },
                     {
                         type = "checkbox",
@@ -961,8 +1159,22 @@ function PvPCooldownTracker.Settings.Init()
                         tooltip = "Set to ON to enable tracking. Note: Sets will still disable automatically when not worn.",
                         getFunc = function() return GetSelectedEnabled(procType) end,
                         setFunc = function(value) SetSelectedEnabled(procType, value) end,
-                        width = "full",
+                        width = "half",
                         disabled = function() return ShouldOptionBeDisabled(procType) end,
+                    },
+                    {
+                        type = "button",
+                        name = "Preview Cooldown",
+                        tooltip = "Fakes a proc so you can see and hear this tracker counting down. Turn on Show Trackers While In Menus to watch it from here.",
+                        func = function()
+                            local key = GetValidSelectedKey(procType)
+                            local tracking = TrackingRef or PvPCooldownTracker.Tracking
+                            if key and tracking and type(tracking.TestProc) == "function" then
+                                tracking.TestProc(key)
+                            end
+                        end,
+                        width = "half",
+                        disabled = function() return ShouldOptionBeDisabled(procType, GetSelectedEnabled(procType)) end,
                     },
                     {
                         type = "slider",
@@ -976,7 +1188,7 @@ function PvPCooldownTracker.Settings.Init()
                         clampInput = true,
                         decimals = 0,
                         tooltip = "X Position on screen",
-                        width = "full",
+                        width = "half",
                         disabled = function() return ShouldOptionBeDisabled(procType) end,
                     },
                     {
@@ -991,22 +1203,18 @@ function PvPCooldownTracker.Settings.Init()
                         clampInput = true,
                         decimals = 0,
                         tooltip = "Y Position on screen",
-                        width = "full",
+                        width = "half",
                         disabled = function() return ShouldOptionBeDisabled(procType) end,
-                    },
-                    {
-                        type = "description",
-                        text = "Setting ON or OFF is account-wide. All other settings (such as size, sounds, and position) also apply account-wide.",
-                        width = "full",
                     },
                     {
                         type = "slider",
                         name = "Size",
+                        tooltip = "Scale of this tracker.",
                         getFunc = function() return GetSelectedSize(procType) end,
                         setFunc = function(size) SetSelectedSize(procType, size) UpdateSelectedAppearance(procType) end,
-                        min = 0,
+                        min = 20,
                         max = 260,
-                        step = 10,
+                        step = 2,
                         clampInput = true,
                         decimals = 0,
                         default = 64,
@@ -1031,7 +1239,7 @@ function PvPCooldownTracker.Settings.Init()
                         setFunc = function(value) SetSelectedSoundOnProc(procType, value) end,
                         tooltip = "Sound volume based on Interface volume setting.",
                         sort = "name-up",
-                        width = "full",
+                        width = "half",
                         scrollable = true,
                         disabled = function() return ShouldOptionBeDisabled(procType, GetSelectedSoundOnProcEnabled(procType)) end,
                     },
@@ -1039,7 +1247,7 @@ function PvPCooldownTracker.Settings.Init()
                         type = "button",
                         name = "Test Sound",
                         func = function() PlaySelectedTestSound(procType, "onProc") end,
-                        width = "full",
+                        width = "half",
                         disabled = function() return ShouldOptionBeDisabled(procType, GetSelectedSoundOnProcEnabled(procType)) end,
                     },
                     {
@@ -1060,7 +1268,7 @@ function PvPCooldownTracker.Settings.Init()
                         setFunc = function(value) SetSelectedSoundOnReady(procType, value) end,
                         tooltip = "Sound volume based on game interface volume setting.",
                         sort = "name-up",
-                        width = "full",
+                        width = "half",
                         scrollable = true,
                         disabled = function() return ShouldOptionBeDisabled(procType, GetSelectedSoundOnReadyEnabled(procType)) end,
                     },
@@ -1068,10 +1276,20 @@ function PvPCooldownTracker.Settings.Init()
                         type = "button",
                         name = "Test Sound",
                         func = function() PlaySelectedTestSound(procType, "onReady") end,
-                        width = "full",
+                        width = "half",
                         disabled = function() return ShouldOptionBeDisabled(procType, GetSelectedSoundOnReadyEnabled(procType)) end,
                     },
                 },
+        })
+    end
+
+    -- Add a Proc submenu (provided by ProcCapture.lua)
+    if PvPCooldownTracker.ProcCapture and type(PvPCooldownTracker.ProcCapture.BuildLAMControls) == "function" then
+        table.insert(optionsTable, {
+            type     = "submenu",
+            name     = "|cFFD27FAdd a Proc|r",
+            tooltip  = "Track a proc that just went off, even if the addon does not know it.",
+            controls = PvPCooldownTracker.ProcCapture.BuildLAMControls(),
         })
     end
 
@@ -1102,7 +1320,8 @@ function PvPCooldownTracker.Settings.Init()
         return
     end
 
-    registerAddonPanel(lam, addonId, panelData)
+    -- Kept so other modules can tell when this panel is the one being opened.
+    PvPCooldownTracker.Settings.panel = registerAddonPanel(lam, addonId, panelData)
 
     registerOptionControls(lam, addonId, optionsTable)
 

@@ -27,6 +27,8 @@ default ~30 second ability cooldown).
   position, size, colors, sounds, and which sets/synergies are tracked.
 - **src/Defaults.lua** - default SavedVariables values (styling, layout, sounds) generated per
   tracked set.
+- **src/ProcCapture.lua** - records the procs that recently went off on you and powers the
+  "Add a Proc" menu, so you can start tracking any of them yourself (see below).
 - **src/Sounds.lua** - the list of ~100 built-in game sounds selectable for "on proc" / "off
   cooldown" alerts.
 - **lib/LibEquipmentBonus/LibEquipmentBonus.lua** - a bundled helper library that inspects equipped gear slots to report
@@ -37,6 +39,35 @@ Together these pieces let a player equip a tracked set/synergy, have the
 addon automatically detect it, and show a repositionable, resizable,
 color-customizable icon with a countdown bar and optional proc/ready sounds
 whenever that cooldown is active.
+
+## Adding your own procs
+
+Saw something proc that the addon does not track? You do not need to look up
+ability IDs:
+
+1. Let the proc go off in combat. The addon keeps a short list of what
+   recently fired on you (buffs/effects by default; switch **What To Record**
+   to *Everything* for procs that only deal damage, heal, or restore resources).
+2. Open **Settings > PvPCooldownTracker > Add a Proc** and pick it from
+   **Recent Procs**. If it fired more than once, the cooldown is pre-filled
+   from the shortest gap seen between two procs.
+3. Set the cooldown, optionally rename it, and press **Track This Proc**.
+
+Added procs are tracked all the time (they are not tied to equipped gear),
+are saved account-wide, and show up under **Tracked Cooldowns** where you can
+move, resize, and change their sounds like any built-in set. Remove them
+again from **Add a Proc > Your Procs**. `/pvpcooldowntracker procs` prints
+the recent list to chat.
+
+## Appearance
+
+Trackers are drawn as a card with the icon, name, countdown, and a progress
+bar that turns to the "ready" color with a glow pulse when the proc is back
+up. **Settings > Appearance** offers color themes (Ember, Frost, Venom,
+Blood, Gold, Mono), per-color pickers, an icon-only layout, and toggles for
+the background card, name, and the floating proc/ready announcements.
+**Arrange In A Column** stacks all enabled trackers so they do not overlap,
+and **Preview Cooldown** fakes a proc so you can check the look and sounds.
 
 ## Credits / Origin
 
