@@ -846,12 +846,8 @@ function PCT.EquippedSets.BuildLAMControls()
     -- LibAddonMenu only reads a dropdown's choices when it is built, so push
     -- list changes to the live control (if the panel has been opened already).
     local function PushChoices(reference, choices)
-        local control = _G[reference]
-        if control ~= nil and type(control.UpdateChoices) == "function" then
-            control:UpdateChoices(choices)
-            if type(control.UpdateValue) == "function" then
-                control:UpdateValue()
-            end
+        if PCT.Settings and type(PCT.Settings.PushDropdownChoices) == "function" then
+            PCT.Settings.PushDropdownChoices(reference, choices)
         end
     end
 

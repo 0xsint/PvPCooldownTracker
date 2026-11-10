@@ -4,7 +4,7 @@
 -- -----------------------------------------------------------------------------
 PvPCooldownTracker            = PvPCooldownTracker or {}
 PvPCooldownTracker.name       = "PvPCooldownTracker"
-PvPCooldownTracker.version    = "1.2.0"
+PvPCooldownTracker.version    = "1.2.1"
 PvPCooldownTracker.dbVersion  = 1
 PvPCooldownTracker.slash      = "/pvpcooldowntracker"
 PvPCooldownTracker.prefix     = "[PvPCooldownTracker] "

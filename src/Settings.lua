@@ -230,6 +230,124 @@ PvPCooldownTracker.Settings.EnsureSetSavedVars = EnsureSelectedSetSavedVars
 
 
 -- ============================================================================
+-- Live dropdown lists
+-- ============================================================================
+-- Dropdown lists that change while playing (recent procs, added procs, tracked
+-- cooldowns) have to be pushed to the menu library by hand:
+--   * PC: LibAddonMenu only reads `choices` when the control is built, so the
+--     live control (found through its `reference`) gets UpdateChoices().
+--   * Console: LibAddonMenu converts the whole menu to LibHarvensAddonSettings
+--     once at load and copies every dropdown's choices into an `items` list.
+--     That copy is rewritten in place here, otherwise the list would stay
+--     frozen at whatever it held when the addon loaded.
+local consolePanel = nil       -- LibHarvensAddonSettings panel object (console only)
+local consoleDropdowns = {}    -- [reference] = { setting = <LHAS setting>, option = <LAM option> }
+
+local function RebuildConsoleItems(entry, choices, values)
+    local setting = entry.setting
+    if type(setting.items) ~= "table" then
+        setting.items = {}
+    end
+
+    choices = type(choices) == "table" and choices or entry.option.choices or {}
+    values = type(values) == "table" and values or entry.option.choicesValues or choices
+
+    local items = setting.items
+    for i = #items, 1, -1 do items[i] = nil end
+    for i = 1, #choices do
+        local value = values[i]
+        if value == nil then value = choices[i] end
+        items[i] = { name = choices[i], data = value }
+    end
+end
+
+local function RefreshConsolePanel()
+    -- Only redraw while this addon's settings are the ones on screen.
+    if type(consolePanel) == "table"
+        and consolePanel.selected == true
+        and type(consolePanel.UpdateControls) == "function"
+    then
+        pcall(consolePanel.UpdateControls, consolePanel)
+    end
+end
+
+-- quiet = true only updates the stored list (no redraw); used for background
+-- updates while the menu is most likely closed.
+function PvPCooldownTracker.Settings.PushDropdownChoices(reference, choices, values, tooltips, quiet)
+    local control = _G[reference]
+    if control ~= nil and type(control.UpdateChoices) == "function" then
+        control:UpdateChoices(choices, values, tooltips)
+        if type(control.UpdateValue) == "function" then
+            control:UpdateValue()
+        end
+    end
+
+    local entry = consoleDropdowns[reference]
+    if entry ~= nil then
+        RebuildConsoleItems(entry, choices, values)
+        if not quiet then
+            RefreshConsolePanel()
+        end
+    end
+end
+
+-- Called once after the menu is registered. Does nothing on PC.
+local function HookConsoleDropdowns(lam, addonId, optionsTable)
+    local conversion = type(lam) == "table" and lam.LHASConversion or nil
+    local panel = type(conversion) == "table"
+        and type(conversion.settingTables) == "table"
+        and conversion.settingTables[addonId]
+        or nil
+    if type(panel) ~= "table" or type(panel.settings) ~= "table" then
+        return
+    end
+
+    consolePanel = panel
+
+    local function FindSetting(label)
+        for i = 1, #panel.settings do
+            local setting = panel.settings[i]
+            if type(setting) == "table" and setting.labelText == label and type(setting.items) == "table" then
+                return setting
+            end
+        end
+        return nil
+    end
+
+    local function Walk(controls)
+        for _, option in ipairs(controls) do
+            if option.type == "dropdown" and type(option.reference) == "string" then
+                local setting = FindSetting(option.name)
+                if setting ~= nil then
+                    local entry = { setting = setting, option = option }
+                    consoleDropdowns[option.reference] = entry
+
+                    -- The converted getter looks names up in a map built at
+                    -- load; replace it with one that reads the live list.
+                    setting.getFunction = function()
+                        local value = option.getFunc()
+                        local items = setting.items
+                        for i = 1, #items do
+                            if items[i].data == value then
+                                return items[i].name
+                            end
+                        end
+                        return items[1] and items[1].name or ""
+                    end
+
+                    RebuildConsoleItems(entry)
+                end
+            end
+            if type(option.controls) == "table" then
+                Walk(option.controls)
+            end
+        end
+    end
+
+    Walk(optionsTable)
+end
+
+-- ============================================================================
 -- Global Options
 -- ============================================================================
 
@@ -865,13 +983,7 @@ function PvPCooldownTracker.Settings.Init()
             EnsureSavedVarsState().lastSelectedSet = preferredKey
         end
 
-        local control = _G[SET_DROPDOWN]
-        if control ~= nil and type(control.UpdateChoices) == "function" then
-            control:UpdateChoices(target.data, target.values, target.description)
-            if type(control.UpdateValue) == "function" then
-                control:UpdateValue()
-            end
-        end
+        PvPCooldownTracker.Settings.PushDropdownChoices(SET_DROPDOWN, target.data, target.values, target.description)
     end
 
     PvPCooldownTracker.Settings.RefreshSetChoices = RefreshSetChoices
@@ -1324,6 +1436,9 @@ function PvPCooldownTracker.Settings.Init()
     PvPCooldownTracker.Settings.panel = registerAddonPanel(lam, addonId, panelData)
 
     registerOptionControls(lam, addonId, optionsTable)
+
+    -- Console builds the menu differently; keep its dropdown lists live too.
+    HookConsoleDropdowns(lam, addonId, optionsTable)
 
     if type(PvPCooldownTracker.Trace) == "function" then
         PvPCooldownTracker:Trace(2, "Finished InitSettings()")

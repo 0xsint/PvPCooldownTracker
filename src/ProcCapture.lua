@@ -209,6 +209,9 @@ local function Record(abilityId, abilityName, result)
             lastMs  = now,
         }
         recordCount = recordCount + 1
+        if type(Capture.onNewRecord) == "function" then
+            Capture.onNewRecord(records[abilityId])
+        end
         return
     end
 
@@ -501,13 +504,9 @@ end
 -- -----------------------------------------------------------------------------
 -- Settings menu (LibAddonMenu controls)
 -- -----------------------------------------------------------------------------
-local function PushChoices(reference, choices, values, tooltips)
-    local control = _G[reference]
-    if control ~= nil and type(control.UpdateChoices) == "function" then
-        control:UpdateChoices(choices, values, tooltips)
-        if type(control.UpdateValue) == "function" then
-            control:UpdateValue()
-        end
+local function PushChoices(reference, choices, values, tooltips, quiet)
+    if PCT.Settings and type(PCT.Settings.PushDropdownChoices) == "function" then
+        PCT.Settings.PushDropdownChoices(reference, choices, values, tooltips, quiet)
     end
 end
 
@@ -539,7 +538,7 @@ function Capture.BuildLAMControls()
         draft.cooldownSec = Capture.SuggestCooldownSeconds(rec)
     end
 
-    local function RefreshRecent()
+    local function RefreshRecent(quiet)
         local recent = Capture.GetRecent()
         local choices, values, tooltips = {}, {}, {}
 
@@ -551,11 +550,15 @@ function Capture.BuildLAMControls()
             choices[1] = "-- Pick a proc --"
             values[1] = NO_SELECTION
             tooltips[1] = "Most recent procs are listed first."
-            local now = GetGameTimeMilliseconds()
+            local nameCount = {}
+            for _, rec in ipairs(recent) do
+                nameCount[rec.name] = (nameCount[rec.name] or 0) + 1
+            end
             for _, rec in ipairs(recent) do
                 local tracked = Capture.FindTrackedKey(rec.id)
-                local ago = math.max(0, math.floor((now - rec.lastMs) / 1000))
-                choices[#choices + 1] = string.format("%s%s  -  %ds ago", rec.name, tracked and "  [tracked]" or "", ago)
+                -- Different abilities can share a name; show the ID to tell them apart.
+                local label = nameCount[rec.name] > 1 and string.format("%s (%d)", rec.name, rec.id) or rec.name
+                choices[#choices + 1] = label .. (tracked and "  [tracked]" or "")
                 values[#values + 1] = rec.id
                 tooltips[#tooltips + 1] = Capture.DescribeRecord(rec)
             end
@@ -569,8 +572,12 @@ function Capture.BuildLAMControls()
             selectedId = NO_SELECTION
         end
 
-        PushChoices(RECENT_DROPDOWN, recentChoices, recentValues, recentTooltips)
+        PushChoices(RECENT_DROPDOWN, recentChoices, recentValues, recentTooltips, quiet)
     end
+
+    -- Keep the list current as new procs are seen, so it is already filled in
+    -- when the menu is opened (the console menu has no "panel opened" signal).
+    Capture.onNewRecord = function() RefreshRecent(true) end
 
     local function RefreshAdded(preferred)
         local keys = Capture.GetUserProcKeys()
@@ -652,7 +659,7 @@ function Capture.BuildLAMControls()
     -- Keep the list fresh every time the settings panel is opened.
     if CALLBACK_MANAGER ~= nil then
         CALLBACK_MANAGER:RegisterCallback("LAM-PanelOpened", function(panel)
-            if PCT.Settings and panel == PCT.Settings.panel then
+            if PCT.Settings and panel ~= nil and panel == PCT.Settings.panel then
                 RefreshRecent()
                 RefreshAdded()
             end
@@ -708,7 +715,7 @@ function Capture.BuildLAMControls()
             type    = "button",
             name    = "Refresh List",
             tooltip = "Reload the list with everything recorded so far.",
-            func    = RefreshRecent,
+            func    = function() RefreshRecent() end,
             width   = "half",
         },
         {

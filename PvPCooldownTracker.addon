@@ -2,8 +2,8 @@
 ## APIVersion: 101046
 ## SavedVariables: CooldownsVariables1 CooldownsVariables2 CooldownsVariables2AccountWide
 ## Description: Displays cooldowns for various procs from set bonuses
-## Version: 1.2.0
-## AddOnVersion: 120
+## Version: 1.2.1
+## AddOnVersion: 121
 ## Author: |cFFCCCCVixen Hunny|r 
 ## DependsOn: LibAddonMenu-2.0
 
