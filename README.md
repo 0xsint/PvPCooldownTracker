@@ -5,14 +5,6 @@ countdowns for the cooldowns of set bonuses, synergies, and class passives
 that are otherwise hard to track by eye (e.g. anything longer than the
 default ~30 second ability cooldown).
 
-![Mockup of PvPCooldownTracker trackers on the ESO combat HUD](art/preview-hud.png)
-
-![Mockup of the Add a Proc menu in the console settings](art/preview-menu.png)
-
-*Mockups of version 1.2, not in-game screenshots. The trackers are drawn to
-the addon's real layout and default "Ember" colors; the game HUD around them,
-the icons, "@Opponent", and the "Verdant Surge" example proc are placeholders.*
-
 ## What the code does
 
 - **PvPCooldownTracker.addon** - the addon manifest (title, API version, SavedVariables, load order, and
