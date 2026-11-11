@@ -5,6 +5,12 @@ countdowns for the cooldowns of set bonuses, synergies, and class passives
 that are otherwise hard to track by eye (e.g. anything longer than the
 default ~30 second ability cooldown).
 
+![Mockup of the PvPCooldownTracker trackers and the Add a Proc menu](art/preview.png)
+
+*Mockup of version 1.2, not an in-game screenshot. It is drawn to the
+addon's real layout and default "Ember" colors, but the icons are
+placeholders and "Verdant Surge" is a made-up example of a player-added proc.*
+
 ## What the code does
 
 - **PvPCooldownTracker.addon** - the addon manifest (title, API version, SavedVariables, load order, and
